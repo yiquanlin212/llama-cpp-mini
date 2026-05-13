@@ -1,0 +1,13 @@
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+models/
+*.gguf
+
+.vscode/
+.idea/
+.DS_Store
+*.swp
