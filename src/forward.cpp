@@ -100,7 +100,7 @@ std::vector<float> Forward(const LlamaModel& model,
     const int RD  = cfg.rope_dim;
     const int V   = cfg.vocab_size;
 
-    if (pos >= cache.max_seq) {
+    if (pos < 0 || pos >= cache.max_seq) {
         throw std::runtime_error("Forward: position exceeds KV cache size");
     }
 
