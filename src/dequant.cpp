@@ -7,6 +7,8 @@
 namespace llamacpp {
 
 constexpr int    QK_K             = 256;
+constexpr int    QK8_0            = 32;
+constexpr size_t Q8_0_BLOCK_BYTES = 2 + 32;            // 34 bytes
 constexpr size_t Q4_K_BLOCK_BYTES = 2  + 2  + 12 + 128;  // 144 bytes
 constexpr size_t Q6_K_BLOCK_BYTES = 128 + 64 + 16 + 2;   // 210 bytes
 
@@ -18,6 +20,23 @@ static inline void get_scale_min_k4(int j, const uint8_t* q,
     } else {
         *d = (q[j + 4] & 0x0F) | ((q[j - 4] >> 6) << 4);
         *m = (q[j + 4] >> 4)   | ((q[j]     >> 6) << 4);
+    }
+}
+
+void DequantizeQ8_0(const uint8_t* src, float* dst, int64_t n_elements) {
+    if (n_elements % QK8_0 != 0) {
+        throw std::runtime_error("DequantizeQ8_0: n_elements must be a multiple of 32");
+    }
+    int64_t nb = n_elements / QK8_0;
+    for (int64_t i = 0; i < nb; ++i) {
+        const uint8_t* block = src + i * Q8_0_BLOCK_BYTES;
+        uint16_t d_raw;
+        std::memcpy(&d_raw, block, 2);
+        const float d = fp16_to_fp32(d_raw);
+        const int8_t* q = reinterpret_cast<const int8_t*>(block + 2);
+        for (int j = 0; j < QK8_0; ++j) {
+            dst[i * QK8_0 + j] = d * static_cast<float>(q[j]);
+        }
     }
 }
 
@@ -114,6 +133,7 @@ void DequantizeTensor(GGMLType type, const uint8_t* src,
     switch (type) {
         case GGMLType::F32:  DequantizeF32 (src, dst, n_elements); break;
         case GGMLType::F16:  DequantizeF16 (src, dst, n_elements); break;
+        case GGMLType::Q8_0: DequantizeQ8_0(src, dst, n_elements); break;
         case GGMLType::Q4_K: DequantizeQ4_K(src, dst, n_elements); break;
         case GGMLType::Q6_K: DequantizeQ6_K(src, dst, n_elements); break;
         default:
@@ -126,6 +146,7 @@ size_t BytesPerTensor(GGMLType type, int64_t n_elements) {
     switch (type) {
         case GGMLType::F32:  return static_cast<size_t>(n_elements) * 4;
         case GGMLType::F16:  return static_cast<size_t>(n_elements) * 2;
+        case GGMLType::Q8_0: return static_cast<size_t>(n_elements / QK8_0) * Q8_0_BLOCK_BYTES;
         case GGMLType::Q4_K: return static_cast<size_t>(n_elements / QK_K) * Q4_K_BLOCK_BYTES;
         case GGMLType::Q6_K: return static_cast<size_t>(n_elements / QK_K) * Q6_K_BLOCK_BYTES;
         default:

@@ -17,10 +17,10 @@ inline float fp16_to_fp32(uint16_t h) {
         if (mant == 0) {
             out = sign;
         } else {
-            while ((mant & 0x0400) == 0) { mant <<= 1; exp--; }
+            int32_t e = -14;
+            while ((mant & 0x0400) == 0) { mant <<= 1; --e; }
             mant &= 0x03FF;
-            exp++;
-            out = sign | ((exp + 112) << 23) | (mant << 13);
+            out = sign | (static_cast<uint32_t>(e + 127) << 23) | (mant << 13);
         }
     } else if (exp == 31) {
         out = sign | 0x7F800000 | (mant << 13);
@@ -34,6 +34,7 @@ inline float fp16_to_fp32(uint16_t h) {
 
 void DequantizeF32 (const uint8_t* src, float* dst, int64_t n_elements);
 void DequantizeF16 (const uint8_t* src, float* dst, int64_t n_elements);
+void DequantizeQ8_0(const uint8_t* src, float* dst, int64_t n_elements);
 void DequantizeQ4_K(const uint8_t* src, float* dst, int64_t n_elements);
 void DequantizeQ6_K(const uint8_t* src, float* dst, int64_t n_elements);
 
