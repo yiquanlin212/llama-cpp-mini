@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cstdint>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "llamacpp/tensor.h"
 
 namespace llamacpp {
 
@@ -84,6 +85,10 @@ struct GGUFTensorInfo {
 class GGUFFile {
 public:
     static std::unique_ptr<GGUFFile> Open(const std::string& path);
+    ~GGUFFile();
+
+    GGUFFile(const GGUFFile&) = delete;
+    GGUFFile& operator=(const GGUFFile&) = delete;
 
     uint32_t Version()       const { return version_; }
     uint64_t TensorCount()   const { return tensor_count_; }
@@ -98,6 +103,7 @@ public:
     uint64_t    GetU64(const std::string& key)    const;
     float       GetF32(const std::string& key)    const;
     std::string GetString(const std::string& key) const;
+    Tensor      load_tensor_f32(const std::string& name) const;
 
 private:
     GGUFFile() = default;
@@ -109,6 +115,9 @@ private:
     uint64_t alignment_         = 32;
     std::map<std::string, GGUFValue> kv_;
     std::vector<GGUFTensorInfo>      tensors_;
+    int fd_ = -1;
+    const uint8_t* data_ = nullptr;
+    uint64_t file_size_ = 0;
 };
 
 }  // namespace llamacpp

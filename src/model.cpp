@@ -1,44 +1,12 @@
 #include "llamacpp/model.h"
 
 #include <chrono>
-#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#include "llamacpp/dequant.h"
-
 namespace llamacpp {
-
-static Tensor LoadAndDequantize(std::ifstream& in,
-                                uint64_t base_offset,
-                                const GGUFTensorInfo& tinfo) {
-    int64_t n_elements = 1;
-    for (int64_t d : tinfo.shape) n_elements *= d;
-
-    size_t n_bytes = BytesPerTensor(tinfo.type, n_elements);
-    std::vector<uint8_t> raw(n_bytes);
-
-    in.seekg(static_cast<std::streamoff>(base_offset + tinfo.offset));
-    in.read(reinterpret_cast<char*>(raw.data()),
-            static_cast<std::streamsize>(n_bytes));
-    if (!in) {
-        throw std::runtime_error("model: short read for tensor " + tinfo.name);
-    }
-
-    Tensor t(tinfo.shape);
-    DequantizeTensor(tinfo.type, raw.data(), t.data(), n_elements);
-    return t;
-}
-
-static const GGUFTensorInfo& FindTensor(const std::vector<GGUFTensorInfo>& tensors,
-                                        const std::string& name) {
-    for (const auto& t : tensors) {
-        if (t.name == name) return t;
-    }
-    throw std::runtime_error("model: tensor not found: " + name);
-}
 
 static bool HasTensor(const std::vector<GGUFTensorInfo>& tensors,
                       const std::string& name) {
@@ -90,27 +58,20 @@ std::unique_ptr<LlamaModel> LlamaModel::Load(const std::string& gguf_path,
         std::cout << "  eos_token_id      = " << cfg.eos_token_id << std::endl;
     }
 
-    std::ifstream in(gguf_path, std::ios::binary);
-    if (!in) throw std::runtime_error("model: cannot reopen " + gguf_path);
-    uint64_t base = gguf->TensorDataOffset();
-
     auto model = std::unique_ptr<LlamaModel>(new LlamaModel());
     model->config = cfg;
 
     auto t_start = std::chrono::high_resolution_clock::now();
 
     if (verbose) std::cout << "[load] token_embd.weight ..." << std::endl;
-    model->token_embd  = LoadAndDequantize(in, base,
-        FindTensor(gguf->Tensors(), "token_embd.weight"));
+    model->token_embd  = gguf->load_tensor_f32("token_embd.weight");
 
     if (verbose) std::cout << "[load] output_norm.weight ..." << std::endl;
-    model->output_norm = LoadAndDequantize(in, base,
-        FindTensor(gguf->Tensors(), "output_norm.weight"));
+    model->output_norm = gguf->load_tensor_f32("output_norm.weight");
 
     if (HasTensor(gguf->Tensors(), "output.weight")) {
         if (verbose) std::cout << "[load] output.weight (untied) ..." << std::endl;
-        model->output_w        = LoadAndDequantize(in, base,
-            FindTensor(gguf->Tensors(), "output.weight"));
+        model->output_w        = gguf->load_tensor_f32("output.weight");
         model->tied_embeddings = false;
     } else {
         if (verbose) std::cout << "[load] output is tied to token_embd" << std::endl;
@@ -124,15 +85,15 @@ std::unique_ptr<LlamaModel> LlamaModel::Load(const std::string& gguf_path,
         }
         std::string p = "blk." + std::to_string(L);
         auto& b = model->blocks[L];
-        b.attn_norm   = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".attn_norm.weight"));
-        b.attn_q      = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".attn_q.weight"));
-        b.attn_k      = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".attn_k.weight"));
-        b.attn_v      = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".attn_v.weight"));
-        b.attn_output = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".attn_output.weight"));
-        b.ffn_norm    = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".ffn_norm.weight"));
-        b.ffn_gate    = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".ffn_gate.weight"));
-        b.ffn_up      = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".ffn_up.weight"));
-        b.ffn_down    = LoadAndDequantize(in, base, FindTensor(gguf->Tensors(), p + ".ffn_down.weight"));
+        b.attn_norm   = gguf->load_tensor_f32(p + ".attn_norm.weight");
+        b.attn_q      = gguf->load_tensor_f32(p + ".attn_q.weight");
+        b.attn_k      = gguf->load_tensor_f32(p + ".attn_k.weight");
+        b.attn_v      = gguf->load_tensor_f32(p + ".attn_v.weight");
+        b.attn_output = gguf->load_tensor_f32(p + ".attn_output.weight");
+        b.ffn_norm    = gguf->load_tensor_f32(p + ".ffn_norm.weight");
+        b.ffn_gate    = gguf->load_tensor_f32(p + ".ffn_gate.weight");
+        b.ffn_up      = gguf->load_tensor_f32(p + ".ffn_up.weight");
+        b.ffn_down    = gguf->load_tensor_f32(p + ".ffn_down.weight");
     }
 
     auto t_end = std::chrono::high_resolution_clock::now();
