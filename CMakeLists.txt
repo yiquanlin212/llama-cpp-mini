@@ -20,4 +20,5 @@ add_executable(llama_mini
     src/dequant.cpp
     src/model.cpp
     src/forward.cpp
+    src/tokenizer.cpp
 )
