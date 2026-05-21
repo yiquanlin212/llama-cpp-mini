@@ -4,6 +4,10 @@
 #include <cmath>
 #include <stdexcept>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 #include "llamacpp/tensor.h"
 
 namespace llamacpp {
@@ -11,13 +15,7 @@ namespace llamacpp {
 // ============================================================
 // matmul: C[M,N] = A[M,K] @ B[K,N]
 //
-// Loop order is i-k-j (rank-1 update), NOT the textbook i-j-k.
-// This matters because A, B, C are all row-major:
-//   - innermost j loop touches B[k,:] and C[i,:] contiguously
-//   - cache lines are reused for the entire j sweep
-//   - clang -O3 can auto-vectorize the inner loop with NEON
-// Empirically 5-15x faster than i-j-k on Apple Silicon.
-// Step 7 will replace with hand-written NEON intrinsics + tiling.
+// Uses a 4x4 NEON block on ARM and scalar cleanup for edges.
 // ============================================================
 inline Tensor matmul(const Tensor& a, const Tensor& b) {
     if (a.ndim() != 2 || b.ndim() != 2) {
@@ -36,7 +34,43 @@ inline Tensor matmul(const Tensor& a, const Tensor& b) {
     const float* bp = b.data();
     float*       cp = c.data();
 
-    // Cache-friendly i-k-j order
+#if defined(__ARM_NEON)
+    int64_t M4 = (M / 4) * 4;
+    int64_t N4 = (N / 4) * 4;
+    for (int64_t i = 0; i < M4; i += 4) {
+        for (int64_t j = 0; j < N4; j += 4) {
+            float32x4_t c0 = vdupq_n_f32(0.0f);
+            float32x4_t c1 = vdupq_n_f32(0.0f);
+            float32x4_t c2 = vdupq_n_f32(0.0f);
+            float32x4_t c3 = vdupq_n_f32(0.0f);
+            for (int64_t k = 0; k < K; ++k) {
+                float32x4_t bv = vld1q_f32(bp + k * N + j);
+                c0 = vfmaq_f32(c0, vdupq_n_f32(ap[(i + 0) * K + k]), bv);
+                c1 = vfmaq_f32(c1, vdupq_n_f32(ap[(i + 1) * K + k]), bv);
+                c2 = vfmaq_f32(c2, vdupq_n_f32(ap[(i + 2) * K + k]), bv);
+                c3 = vfmaq_f32(c3, vdupq_n_f32(ap[(i + 3) * K + k]), bv);
+            }
+            vst1q_f32(cp + (i + 0) * N + j, c0);
+            vst1q_f32(cp + (i + 1) * N + j, c1);
+            vst1q_f32(cp + (i + 2) * N + j, c2);
+            vst1q_f32(cp + (i + 3) * N + j, c3);
+        }
+    }
+    for (int64_t i = 0; i < M4; ++i) {
+        for (int64_t j = N4; j < N; ++j) {
+            float sum = 0.0f;
+            for (int64_t k = 0; k < K; ++k) sum += ap[i * K + k] * bp[k * N + j];
+            cp[i * N + j] = sum;
+        }
+    }
+    for (int64_t i = M4; i < M; ++i) {
+        for (int64_t j = 0; j < N; ++j) {
+            float sum = 0.0f;
+            for (int64_t k = 0; k < K; ++k) sum += ap[i * K + k] * bp[k * N + j];
+            cp[i * N + j] = sum;
+        }
+    }
+#else
     for (int64_t i = 0; i < M; ++i) {
         float* c_row = cp + i * N;
         for (int64_t k = 0; k < K; ++k) {
@@ -47,6 +81,7 @@ inline Tensor matmul(const Tensor& a, const Tensor& b) {
             }
         }
     }
+#endif
     return c;
 }
 
